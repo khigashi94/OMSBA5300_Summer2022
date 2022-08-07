@@ -60,7 +60,7 @@ trends_all <- data.frame()
 for (data in list.files(pattern = "trends_up_to_")){
   temp <- read.csv(data)
   trends_all <- rbind(trends_all, temp)
-}
+} 
 
 # Scorecard and ID CSVs
 score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
