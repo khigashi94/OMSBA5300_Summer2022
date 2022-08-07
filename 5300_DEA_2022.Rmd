@@ -1,0 +1,226 @@
+---
+title: "Data_Exploration_MarkDown"
+author: "Kristen Higashi"
+date: "08/07/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
+
+```
+
+## Data Exploration Assignment
+
+### RESEARCH
+
+The College Scorecard was released at the start of September 2015. Among colleges that predominantly grant bachelor’s degrees, did the release of the Scorecard shift student interest to high-earnings colleges relative to low-earnings ones (as proxied by Google searches for keywords associated with those colleges)?
+
+This study seeks to determine how the College Scorecard release (starting in 2015) affected student interest by Google search keywords.
+
+Share of students earning over $25,000/year (threshold earnings) 6 years after entry
+### Notes on Data 
+
+However, college interest may be swayed by many factors, including potential student demographics (race and family legacy), degree interest, and  standing() but the data available for this study only included:
+
+1. College Historical affiliations, location, and attendee demographics
+retention. 
+
+(including physical geographical location or if the school is virtually inteded). IE 
+2. Price of attending and potential debt accrual --- including Pell grants
+3. Study opportunities / Available degrees
+4. Retention (as a measure of approval)
+
+
+
+
+#### Load Libraries
+```{r}
+
+library(car)
+library(vtable)
+library(jtools)
+library(vtable)
+library(purrr)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+
+# Set Working Directory
+setwd("C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
+```
+
+## Load/Join Data Tables
+```{r}
+score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+
+# Bind "trends_up_to_" data
+trends_all <- data.frame()
+for (data in list.files(pattern = "trends_up_to_")){
+  temp <- read.csv(data)
+  trends_all <- rbind(trends_all, temp)
+}
+
+# Scorecard and ID CSVs
+score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+id_name <- read.csv("id_name_link.csv")%>%
+  distinct(schname, .keep_all = TRUE)
+coll_ids <- left_join(id_name, score_card, by = c("unitid"="UNITID"))
+id_name <- read.csv("id_name_link.csv")
+
+
+```
+
+
+```{r}
+# Full join - Removes all "not currently open institutions"
+## College information
+df_undg <- 
+  # Remove duplicate "schname" and join tables
+  unique(left_join(trends_all, coll_ids, by = c("schname" = "schname"))) %>%
+  
+  # filter for schools that predominantly grant bachelor degrees AND currently operating
+  filter(PREDDEG == 3
+         , !is.null(monthorweek)
+         , CURROPER == 1)%>%
+  # earnings
+  mutate(num_earnings= as.numeric(md_earn_wne_p10.REPORTED.EARNINGS)) %>%
+  filter(!is.na(num_earnings))%>%
+  
+  # Convert times
+  mutate(month  = floor_date(ymd(str_sub(monthorweek, 0,10)), unit = c("month"))
+         ,  yr = as.Date(str_sub(monthorweek, 1, 4), "%Y")) %>%
+  mutate(pre_scorecard = as.factor(month < ymd("2015-01-01")))%>%
+  mutate(key = paste(opeid,month, sep = "_"), date_state = paste(STABBR, monthorweek, sep="_"))%>%
+
+
+  # Mutate variables to correct class(es)
+  select(key, date_state, unitid, opeid, opeid6,	schname, INSTNM, STABBR
+         , month, yr, monthorweek, pre_scorecard
+         , STABBR, num_earnings, keyword, keynum, index
+         , c(HBCU:WOMENONLY), RELAFFIL, DISTANCEONLY
+         , starts_with("PCIP")
+         , starts_with("UGDS")
+         , ACTCMMID, SAT_AVG, SAT_AVG_ALL, starts_with("NPT")
+         , starts_with("RET")
+         , starts_with("GRAD")
+         , RPY_3YR_RT_SUPP, PCTFLOAN, PCTPELL, UG25abv, C150_4_POOLED_SUPP.REPORTED.GRAD.RATE, PPTUG_EF)%>%
+  mutate_at(vars(c(HBCU:WOMENONLY), RELAFFIL, DISTANCEONLY), as.factor)%>%
+  mutate_at(vars(matches("PCIP"), matches("UGDS")), as.numeric)%>%
+  mutate_at(vars(matches("NPT"), matches("RET"), matches("GRAD"), RPY_3YR_RT_SUPP, PCTFLOAN, PCTPELL), as.numeric)%>%
+  mutate(UG25abv = as.numeric(UG25abv), C150_4_POOLED_SUPP.REPORTED.GRAD.RATE= as.numeric( C150_4_POOLED_SUPP.REPORTED.GRAD.RATE), PPTUG_EF = as.numeric(PPTUG_EF))%>%
+  mutate_at(vars(ACTCMMID, SAT_AVG, SAT_AVG_ALL), as.numeric)%>%
+
+  # Determine count of searches and the max number of keywords searched
+  group_by(schname, month)%>%
+  mutate(ct_index = sum(index), num_keywords = max(keynum))%>%
+  ungroup()%>%
+  filter(!is.na(month), !is.na(num_earnings))%>%
+
+  # Determine average, standard deviation, and avg+sd for each key word
+  group_by(schname, month, keynum)%>%
+  mutate(limit_index = mean(index) + sd(index))%>%
+  ungroup()%>%
+  
+  # Determine if index is deemed above average (ie above avg+sd in state). TRUE/FALSE (True if larger than avg+stdev)
+  mutate(exc_index = index >= limit_index)%>%
+  filter(!is.na(exc_index)) %>% 
+
+  # Determine average, standard deviation, and avg+sd for earning (by state and date window since states will often have different average wages)
+  group_by(date_state)%>%
+  mutate(limit_earnings = mean(num_earnings) + sd(num_earnings))%>%
+  ungroup()%>%
+
+  # Determine if earnings are deemed above average (ie above avg+sd in state). TRUE/FALSE (True if larger than avg+stdev)
+  mutate(exc_earning = num_earnings>= limit_earnings)%>%
+  filter(!is.na(exc_earning))
+
+```
+
+
+## Data Exploration
+```{r}
+summary(df_undg)
+
+
+
+```
+# 
+# ```{r}
+# 
+# 
+# earns <- lm(num_earnings~UGDS+ UGDS_WHITE+ UGDS_BLACK+ UGDS_HISP+ UGDS_ASIAN+ UGDS_AIAN+ UGDS_NHPI+ UGDS_2MOR+ UGDS_NRA+ UGDS_UNKN, data = df_undg) %>%
+#   export_summs(error_format = 't = {statistic}, p = {p.value}', digits=5)
+# earns
+# 
+# dem <- df_undg%>%
+#  (c(HBCU:WOMENONLY), RELAFFIL, DISTANCEONLY)
+# mutate(tot=sum(c(HBCU:WOMENONLY)))
+# 
+#  dem_lm <- lm(ct_index ~ num_earnings, data = df_undg) 
+# 
+# 
+#  # Mark as private v public institution -->
+# 
+#   ugds_npt <- df_undg%>% 
+# select(num_earnings, exc_earning, starts_with("UGDS"), starts_with("NPT"))%>%
+# 
+# 
+# 
+# 
+# lm(is_pub~PCIP01 + PCIP03 + PCIP04 + PCIP05 + PCIP09 + PCIP10 + PCIP11 + PCIP12 + PCIP13 + PCIP14 + PCIP15 + PCIP16 + PCIP19 + PCIP22  -->
+#     + PCIP23 + PCIP24 + PCIP25 + PCIP26 + PCIP27 + PCIP29 + PCIP30 + PCIP31 + PCIP38 + PCIP39 + PCIP40 + PCIP41 + PCIP42 + PCIP43 + PCIP44 + PCIP45 + PCIP46 + PCIP47 + PCIP48 + PCIP49 + PCIP50 + PCIP51 + PCIP52 + PCIP54, data = df_undg)%>% 
+#    export_summs(error_format = 't = {statistic}, p = {p.value}', digits=5)
+# 
+# 
+# 
+# lm_dem_current <- lm(ct_index~is_pub + UGDS+ UGDS_WHITE+ UGDS_BLACK+ UGDS_HISP+ UGDS_ASIAN+ UGDS_AIAN+ UGDS_NHPI+ UGDS_2MOR+ UGDS_NRA+ UGDS_UNKN, data = df_undg)
+# 
+# lm_dem_flag <- lm(ct_index~ HBCU + PBI + ANNHI + TRIBAL + AANAPII + HSI + NANTI + MENONLY + WOMENONLY + DISTANCEONLY, data = df_undg)
+# 
+# lm_earnings <-  lm(ct_index~num_earnings+ exc_earning, data = df_undg)
+# 
+# export_summs(lm_dem_current, lm_dem_flag, lm_earnings)
+# 
+# linearHypothesis(lm_dem_current)
+# #  -->
+# #  -->
+# # sumpcip <- df_undg%>% -->
+# #   select(key, starts_with ("PCIP"))%>% -->
+# #   replace(is.na(.),0)%>% -->
+# #   transmute(key, sum = rowSums(across(where (is.numeric)))) -->
+# #  -->
+# 
+# # Regression between the total earnings based on  -->
+# 
+# df_undg
+# 
+# 
+# 
+# 
+# # #  -->
+# # # # Merge keyw_ct and avg_earnings -->
+# # # key_earnings <- avg_earnings%>% -->
+# # #   left_join(keyw_ct, by= c("monthorweek", "STABBR"), copy = FALSE )%>% -->
+# # #   drop_na()%>% -->
+# # #   mutate(high_earn = limit_earnings<num_earnings)%>% -->
+# # #   select(unitid, schname, monthorweek, limit_earnings, keynum, index, ct_index, num_keywords, high_earn) -->
+# # #  -->
+# # #  -->
+# # # #  -->
+# # # #  -->
+# # # # ## Regress key earnings -->
+# # # # reg_keyword_earnings <- lm(ct_index ~ high_earn + num_keywords, data = key_earnings) -->
+# # # # export_summs(reg_keyword_earnings) -->
+# # #  -->
+# # #  -->
+# # # #  -->
+# # # # test_ <- lm(ct_index) -->
+# # # # regression <- lm(ct_index~ excess + , data = merged) -->
+# # # # export_summs(regression) -->
+# # # #  -->
+# # #  -->
+# # #  -->
+# # #  -->
+# # #  -->
