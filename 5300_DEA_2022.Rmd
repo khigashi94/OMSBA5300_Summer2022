@@ -37,41 +37,41 @@ retention.
 
 #### Load Libraries
 ```{r}
-# 
-# library(car)
-# library(vtable)
-# library(jtools)
-# library(vtable)
-# library(purrr)
-# library(tidyverse)
-# library(dplyr)
-# library(lubridate)
-# 
-# # Set Working Directory
-# setwd("C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
-# ```
-# 
-# ## Load/Join Data Tables
-# ```{r}
-# score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
-# 
-# # Bind "trends_up_to_" data
-# trends_all <- data.frame()
-# for (data in list.files(pattern = "trends_up_to_")){
-#   temp <- read.csv(data)
-#   trends_all <- rbind(trends_all, temp)
-# } 
-# 
-# # Scorecard and ID CSVs
-# score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
-# id_name <- read.csv("id_name_link.csv")%>%
-#   distinct(schname, .keep_all = TRUE)
-# coll_ids <- left_join(id_name, score_card, by = c("unitid"="UNITID"))
-# id_name <- read.csv("id_name_link.csv")
-# 
+
+library(car)
+library(vtable)
+library(jtools)
+library(vtable)
+library(purrr)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+
+# Set Working Directory
+setwd("C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
+```
+
+## Load/Join Data Tables
+```{r}
+score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+
+# Bind "trends_up_to_" data
+trends_all <- data.frame()
+for (data in list.files(pattern = "trends_up_to_")){
+  temp <- read.csv(data)
+  trends_all <- rbind(trends_all, temp)
+}
+
+# Scorecard and ID CSVs
+score_card <- read.csv("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+id_name <- read.csv("id_name_link.csv")%>%
+  distinct(schname, .keep_all = TRUE)
+coll_ids <- left_join(id_name, score_card, by = c("unitid"="UNITID"))
+id_name <- read.csv("id_name_link.csv")
+
 
 ```
- 
+
 
 ```{r}
 # Full join - Removes all "not currently open institutions"
@@ -79,7 +79,7 @@ retention.
 df_undg <- 
   # Remove duplicate "schname" and join tables
   unique(left_join(trends_all, coll_ids, by = c("schname" = "schname"))) %>%
-   
+  
   # filter for schools that predominantly grant bachelor degrees AND currently operating
   filter(PREDDEG == 3
          , !is.null(monthorweek)
