@@ -7,32 +7,36 @@ output: html_document
 
 ```{r setup, include=FALSE}
 # knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
+knitr::opts_knit$set(root.dir = "C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/5300_DEA_Github/data")
 
 ```
 
 ## Data Exploration Assignment
 
-### RESEARCH
+### Introduction
 
-The College Scorecard was released at the start of September 2015. Among colleges that predominantly grant bachelor’s degrees, did the release of the Scorecard shift student interest to high-earnings colleges relative to low-earnings ones (as proxied by Google searches for keywords associated with those colleges)?
+Just because people say "it's not about the money" doesn't mean that they don't look at the return on investment when picking a college. The College Scorecard provides students a quick reference and ranking based on several factors. The main categories fall within: student demographics, race/gender/religious affiliations, post graduate opportunity, student retention, and of course the students' average income post graduation. 
 
-This study seeks to determine how the College Scorecard release (starting in 2015) affected student interest by Google search keywords.
 
-Share of students earning over $25,000/year (threshold earnings) 6 years after entry
+This study seeks to determine if there is a correlation between release of the College Scorecard (first published in 2015)-- specifically the release of graduates' income --  and student interest. 
+
+In this study, we use Google searches as a proxy to measure student interest. It is assumed that if a student read the college score card and were interested, they would Google the schools to learn more. Because the Google data set provides search information pre-2015, we were able to compare the interest searches before and after the release of the Scorecard. 
+
+To note, we do NOT have control over if the student read the scorecard before Googling or not, and therefore we will not be able to directly attribute the Google search to the College Scorecard. This is simply a baseline investigation before what will need to be a very deep dive into student perceived income importance.
+
+### Findings
+
+There is a clear correlation between income ratings in the College Scorecard and Google searches, however the impact is not large. 
+
+Something to note is that the income amount generally improved through the years (likely inflation or cost of living changes). This may need to be accounted for in longer term studies. 
+
 ### Notes on Data 
 
-However, college interest may be swayed by many factors, including potential student demographics (race and family legacy), degree interest, and  standing() but the data available for this study only included:
+While the purpose of this study is not to determine how or if the school actually caused students to get higher paying jobs post graduation, we needed to control for several factors that may have biased our investigation. That being said, we first opted to focus on schools that predominantly award undergraduate degrees. Following, we controlled for degree type, as different degrees open different career paths and salary pay (ex: Engineers typically get paid higher than philosophy majors. Sad, but true). Colleges do not typically change their graduating class sizes or education track (it typically takes years just to change a course track), so we wouldn't see any huge changes within 2013-2016 data collection window. 
 
-1. College Historical affiliations, location, and attendee demographics
-retention. 
+We also needed to consider student/school demographics (ie student ethnic demographics and affiliations. This also includes traditionally 'all male' and 'all female' schools, as well as Black, Asian, Native American, etc.). Historical affiliations are typically core to the college's beliefs/priorities, thus it is rather rare for them to change over time. 
 
-(including physical geographical location or if the school is virtually inteded). IE 
-2. Price of attending and potential debt accrual --- including Pell grants
-3. Study opportunities / Available degrees
-4. Retention (as a measure of approval)
-
-
+While not included in this study, price of attening and long term student debt will also change accessibility to different schools. Lower income families typically do not have the funds or must take enormous loans to put a single student through school. In this instance, many students may not explore certain school opportunities if it is infeasible for them to pay for it.
 
 
 #### Load Libraries
@@ -46,9 +50,8 @@ library(purrr)
 library(tidyverse)
 library(dplyr)
 library(lubridate)
+library(fixest)
 
-# Set Working Directory
-setwd("C:/Users/krist/Documents/SU_OMSBA/Summer_2022/DataExplorationAssignment/data")
 ```
 
 ## Load/Join Data Tables
@@ -71,19 +74,24 @@ id_name <- read.csv("id_name_link.csv")
 
 
 ```
-
+ 
 
 ```{r}
 # Full join - Removes all "not currently open institutions"
 ## College information
 df_undg <- 
   # Remove duplicate "schname" and join tables
-  unique(left_join(trends_all, coll_ids, by = c("schname" = "schname"))) %>%
-  
+  unique(left_join(trends_all, coll_ids, by = c("schname" = "schname")))%>%
+   
   # filter for schools that predominantly grant bachelor degrees AND currently operating
   filter(PREDDEG == 3
          , !is.null(monthorweek)
          , CURROPER == 1)%>%
+  # Flag for public v private
+  mutate(is_pub = as.factor(CONTROL ==1)) %>% 
+  
+  # categorize degrees 
+  
   # earnings
   mutate(num_earnings= as.numeric(md_earn_wne_p10.REPORTED.EARNINGS)) %>%
   filter(!is.na(num_earnings))%>%
@@ -94,10 +102,10 @@ df_undg <-
   mutate(pre_scorecard = as.factor(month < ymd("2015-01-01")))%>%
   mutate(key = paste(opeid,month, sep = "_"), date_state = paste(STABBR, monthorweek, sep="_"))%>%
 
-
   # Mutate variables to correct class(es)
-  select(key, date_state, unitid, opeid, opeid6,	schname, INSTNM, STABBR
+  select(key, date_state, unitid, opeid, opeid6,	schname, INSTNM, STABBR, is_pub
          , month, yr, monthorweek, pre_scorecard
+         , LOCALE
          , STABBR, num_earnings, keyword, keynum, index
          , c(HBCU:WOMENONLY), RELAFFIL, DISTANCEONLY
          , starts_with("PCIP")
@@ -125,8 +133,8 @@ df_undg <-
   
   # Determine if index is deemed above average (ie above avg+sd in state). TRUE/FALSE (True if larger than avg+stdev)
   mutate(exc_index = index >= limit_index)%>%
-  filter(!is.na(exc_index)) %>% 
-
+  filter(!is.na(exc_index)) %>%
+  mutate(hi_lo_index = limit_index - index) %>% 
   # Determine average, standard deviation, and avg+sd for earning (by state and date window since states will often have different average wages)
   group_by(date_state)%>%
   mutate(limit_earnings = mean(num_earnings) + sd(num_earnings))%>%
@@ -142,85 +150,101 @@ df_undg <-
 ## Data Exploration
 ```{r}
 summary(df_undg)
+vtable(df_undg)
 
+
+pre_post <- feols(exc_index~pre_scorecard, data = df_undg) 
+pre_post
+
+
+ggplot(df_undg, aes(x = month, y = ct_index)) + geom_smooth()
+ggplot(df_undg, aes(x = month, y = num_earnings)) + geom_smooth()
+
+
+
+pre_and_earnings <- feols(exc_index~pre_scorecard +num_earnings, data = df_undg)
+pre_and_earnings
+
+
+earn <- feols(ct_index~num_earnings, data = df_undg)
+pre_score <- feols(ct_index~pre_scorecard, data = df_undg)
+etable(pre_and_earnings, earn, pre_score)
+
+demog <- feols(hi_lo_index~num_earnings + HBCU +PBI+ PBI+ ANNHI+ TRIBAL+ AANAPII+ HSI+ NANTI+ MENONLY+ WOMENONLY
+      , data = df_undg)
+demog
+etable(demog)
+
+```
+
+
+
+## Regression
+```{r}
+
+deg_types <- df_undg %>%
+  mutate(hi_lo_index = limit_index - index) %>% 
+  mutate(land_degs = PCIP01 + PCIP03 + PCIP30 + PCIP31 + PCIP48 + PCIP49
+    , stem_degs = PCIP04 + PCIP11 + PCIP14 + PCIP15 + PCIP19 + PCIP26 + PCIP27 + PCIP29 + PCIP40 + 
+      PCIP41 + PCIP51
+    
+    , social_science_degs = PCIP05 + PCIP22 + PCIP38 + PCIP39 + PCIP42 + PCIP45 + PCIP52 + PCIP54
+    
+    , lit_degs = PCIP09 + PCIP10 + PCIP16 + PCIP23 + PCIP24 + PCIP25 + PCIP50
+    
+    , phys_trades_deg = PCIP12 + PCIP46 + PCIP47
+    
+    , pub_trades_deg = PCIP13 + PCIP43 + PCIP44
+    
+    , all_test = PCIP01 + PCIP03 + PCIP30 + PCIP31 + PCIP48 + PCIP49 + PCIP04 + PCIP11 + PCIP14 + 
+      PCIP15 + PCIP19 + PCIP26 + PCIP27 + PCIP29 + PCIP40 + PCIP41 + PCIP51 + PCIP05 + PCIP22 + 
+      PCIP38 + PCIP39 + PCIP42 + PCIP45 + PCIP52 + PCIP54 + PCIP09 + PCIP10 + PCIP16 + PCIP23 + 
+      PCIP24 + PCIP25 + PCIP50 + PCIP12 + PCIP46 + PCIP47 + PCIP13 + PCIP43 + PCIP44
+  ) %>% 
+  
+  select (
+    month, num_earnings, index, limit_index, all_test,land_degs, stem_degs, social_science_degs, lit_degs
+          , phys_trades_deg, pub_trades_deg, LOCALE
+          , pre_scorecard, exc_index, ct_index, hi_lo_index
+          ,  num_earnings, limit_earnings,exc_earning, num_earnings, is_pub
+          , HBCU, PBI, PBI, ANNHI, TRIBAL, AANAPII, HSI, NANTI, MENONLY, WOMENONLY 
+          , PCIP01, PCIP03, PCIP30, PCIP31, PCIP48, PCIP49, PCIP04, PCIP11, PCIP14
+          , PCIP15, PCIP19, PCIP26, PCIP27, PCIP29, PCIP40, PCIP41, PCIP51, PCIP05
+          , PCIP22, PCIP38, PCIP39, PCIP42, PCIP45, PCIP52, PCIP54, PCIP09, PCIP10
+          , PCIP16, PCIP23, PCIP24, PCIP25, PCIP50, PCIP12, PCIP46, PCIP47, PCIP13
+          , PCIP43, PCIP44
+)
+
+
+# lm(hi_lo_index )
+# summary(deg_types)deg_types
+deg_type_check <- feols(ct_index~num_earnings + pre_scorecard | 
+      # College Affiliations
+      HBCU +PBI+PBI+ ANNHI + TRIBAL+ AANAPII+HSI+NANTI  
+      # % Of Degrees by type
+      + PCIP01 + PCIP03 + PCIP30 + PCIP31 + PCIP48 + PCIP49 + PCIP04 + PCIP11 + PCIP14
+      + PCIP15 + PCIP19 + PCIP26 + PCIP27 + PCIP29 + PCIP40 + PCIP41 + PCIP51 + PCIP05
+      + PCIP22 + PCIP38 + PCIP39 + PCIP42 + PCIP45 + PCIP52 + PCIP54 + PCIP09 + PCIP10
+      + PCIP16 + PCIP23 + PCIP24 + PCIP25 + PCIP50 + PCIP12 + PCIP46 + PCIP47 + PCIP13
+      + PCIP43 + PCIP44
+      # loaction of school
+      + LOCALE
+  , data = deg_types)
+
+etable(deg_type_check)
+
+
+deg_types %>%  group_by(month) %>% mutate(avg_hi_lo = mean(hi_lo_index)) %>% 
+  ggplot(aes(x= month, y = ct_index)) + geom_smooth()+
+  geom_vline(xintercept = floor_date(ymd(str_sub("2015-01-01", 0,10)), unit = c("month")))
+
+
+deg_types %>%  group_by(month) %>% mutate(avg_hi_lo = mean(hi_lo_index)) %>% 
+  ggplot(aes(x= num_earnings, y = ct_index)) +  geom_point()+ geom_smooth(method = 'lm') + labs(x = "Amount Earnings", y = "Count of Improved Index", title = "Improved Index v Amount Earnings") 
++theme_bw()
+
+
+# ggplot(deg_types, aes(x = num_earnings, y = ct_index))+ geom_point() geom_smooth(method = 'lm')
 
 
 ```
-# 
-# ```{r}
-# 
-# 
-# earns <- lm(num_earnings~UGDS+ UGDS_WHITE+ UGDS_BLACK+ UGDS_HISP+ UGDS_ASIAN+ UGDS_AIAN+ UGDS_NHPI+ UGDS_2MOR+ UGDS_NRA+ UGDS_UNKN, data = df_undg) %>%
-#   export_summs(error_format = 't = {statistic}, p = {p.value}', digits=5)
-# earns
-# 
-# dem <- df_undg%>%
-#  (c(HBCU:WOMENONLY), RELAFFIL, DISTANCEONLY)
-# mutate(tot=sum(c(HBCU:WOMENONLY)))
-# 
-#  dem_lm <- lm(ct_index ~ num_earnings, data = df_undg) 
-# 
-# 
-#  # Mark as private v public institution -->
-# 
-#   ugds_npt <- df_undg%>% 
-# select(num_earnings, exc_earning, starts_with("UGDS"), starts_with("NPT"))%>%
-# 
-# 
-# 
-# 
-# lm(is_pub~PCIP01 + PCIP03 + PCIP04 + PCIP05 + PCIP09 + PCIP10 + PCIP11 + PCIP12 + PCIP13 + PCIP14 + PCIP15 + PCIP16 + PCIP19 + PCIP22  -->
-#     + PCIP23 + PCIP24 + PCIP25 + PCIP26 + PCIP27 + PCIP29 + PCIP30 + PCIP31 + PCIP38 + PCIP39 + PCIP40 + PCIP41 + PCIP42 + PCIP43 + PCIP44 + PCIP45 + PCIP46 + PCIP47 + PCIP48 + PCIP49 + PCIP50 + PCIP51 + PCIP52 + PCIP54, data = df_undg)%>% 
-#    export_summs(error_format = 't = {statistic}, p = {p.value}', digits=5)
-# 
-# 
-# 
-# lm_dem_current <- lm(ct_index~is_pub + UGDS+ UGDS_WHITE+ UGDS_BLACK+ UGDS_HISP+ UGDS_ASIAN+ UGDS_AIAN+ UGDS_NHPI+ UGDS_2MOR+ UGDS_NRA+ UGDS_UNKN, data = df_undg)
-# 
-# lm_dem_flag <- lm(ct_index~ HBCU + PBI + ANNHI + TRIBAL + AANAPII + HSI + NANTI + MENONLY + WOMENONLY + DISTANCEONLY, data = df_undg)
-# 
-# lm_earnings <-  lm(ct_index~num_earnings+ exc_earning, data = df_undg)
-# 
-# export_summs(lm_dem_current, lm_dem_flag, lm_earnings)
-# 
-# linearHypothesis(lm_dem_current)
-# #  -->
-# #  -->
-# # sumpcip <- df_undg%>% -->
-# #   select(key, starts_with ("PCIP"))%>% -->
-# #   replace(is.na(.),0)%>% -->
-# #   transmute(key, sum = rowSums(across(where (is.numeric)))) -->
-# #  -->
-# 
-# # Regression between the total earnings based on  -->
-# 
-# df_undg
-# 
-# 
-# 
-# 
-# # #  -->
-# # # # Merge keyw_ct and avg_earnings -->
-# # # key_earnings <- avg_earnings%>% -->
-# # #   left_join(keyw_ct, by= c("monthorweek", "STABBR"), copy = FALSE )%>% -->
-# # #   drop_na()%>% -->
-# # #   mutate(high_earn = limit_earnings<num_earnings)%>% -->
-# # #   select(unitid, schname, monthorweek, limit_earnings, keynum, index, ct_index, num_keywords, high_earn) -->
-# # #  -->
-# # #  -->
-# # # #  -->
-# # # #  -->
-# # # # ## Regress key earnings -->
-# # # # reg_keyword_earnings <- lm(ct_index ~ high_earn + num_keywords, data = key_earnings) -->
-# # # # export_summs(reg_keyword_earnings) -->
-# # #  -->
-# # #  -->
-# # # #  -->
-# # # # test_ <- lm(ct_index) -->
-# # # # regression <- lm(ct_index~ excess + , data = merged) -->
-# # # # export_summs(regression) -->
-# # # #  -->
-# # #  -->
-# # #  -->
-# # #  -->
-# # #  -->
