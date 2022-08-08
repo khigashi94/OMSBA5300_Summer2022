@@ -71,7 +71,7 @@ id_name <- read.csv("id_name_link.csv")
 
 
 ```
-
+ 
 
 ```{r}
 # Full join - Removes all "not currently open institutions"
@@ -79,7 +79,7 @@ id_name <- read.csv("id_name_link.csv")
 df_undg <- 
   # Remove duplicate "schname" and join tables
   unique(left_join(trends_all, coll_ids, by = c("schname" = "schname"))) %>%
-  
+   
   # filter for schools that predominantly grant bachelor degrees AND currently operating
   filter(PREDDEG == 3
          , !is.null(monthorweek)
